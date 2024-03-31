@@ -1,2 +1,2 @@
 # AI-generated-burnout-data
-A repository to house the code used to collect AI generated text and images for my bachelor research project
+A repository to house the code used to collect AI generated textual content for my bachelor research project
