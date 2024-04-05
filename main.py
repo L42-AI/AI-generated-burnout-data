@@ -13,17 +13,29 @@ from monological_prompts import monological_prompts
 # This include the API key to acces OpenAI services
 load_dotenv('.env')
 
-def main():
-    OpenAIClient = OpenAI(api_key=os.getenv('API_KEY'))
+OpenAIClient = OpenAI(api_key=os.getenv('API_KEY'))
+
+def monological():
+    SQL = SQLWorker()
 
     for prompt in monological_prompts:
-        print(generate.monological_text(OpenAIClient, prompt))
-    
+        if SQL.in_db(prompt):
+            print(f"Prompt '{prompt}' already in database")
+            continue
+        
+        SQL.add(MonologicalData(prompt=prompt, response=generate.monological_text(OpenAIClient, prompt)))
+
+def dialogical():
     interview = generate.Interview(OpenAIClient)
 
     interview.with_persona(InterviewPersona.PERSON)
 
     interview.start()
 
+def resume_interview():
+
+    interview = generate.Interview(OpenAIClient)
+    interview.continue_interview('interview_PERSON.csv')
+
 if __name__ == "__main__":
-    main()
+    resume_interview()
