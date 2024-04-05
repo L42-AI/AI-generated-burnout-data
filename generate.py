@@ -1,6 +1,6 @@
 import os
 
-from typing import Optional, List, Dict
+from typing import Optional, Literal
 
 from openai import OpenAI
 
@@ -10,11 +10,15 @@ from interview_persona import InterviewPersona
 import pandas as pd
 
 from helpers import create_input_prompt, execute_request
-    
+
+from interview_types import InterviewLog, InterviewLogToAppend
+from interview_types import SystemMessage, AssistantMessage, UserMessage
+from interview_types import MessageMap
+
 def monological_text(OpenAIClient: OpenAI, prompt: str) -> str:
     return execute_request(OpenAIClient, create_input_prompt(prompt), 0.0)
     
-def dialogical_text(OpenAIClient: OpenAI, interview_log: List[Dict]) -> str:
+def dialogical_text(OpenAIClient: OpenAI, interview_log: InterviewLog) -> str:
     return execute_request(OpenAIClient, interview_log, 0.7)
 
 def get_interview_file_name(name: str) -> str:
@@ -31,11 +35,17 @@ def get_interview_file_name(name: str) -> str:
 
     return file_name + ".csv"
 
+def extract_log(interview_file: str) -> InterviewLog:
+    interview_log = []
+    logs = pd.read_csv(interview_file).to_dict(orient="records")
+    for log in logs:
+        interview_log.append(MessageMap[log["role"]](content=log["content"]))
+    return interview_log
 
-def get_questions(interview_log: List[Dict]) -> List[str]:
-    return [log["content"] for log in interview_log if log["role"] == "user"]
+def get_questions(interview_log: InterviewLog) -> list[str]:
+    return [str(log["content"]) for log in interview_log if log["role"] == "user"]
     
-def display_questions(interview_log: List[Dict]) -> None:
+def display_questions(interview_log: InterviewLog) -> None:
     print('=====================')
     for i, question in enumerate(get_questions(interview_log)):
         print()
@@ -43,7 +53,7 @@ def display_questions(interview_log: List[Dict]) -> None:
         print()
     print('=====================')
 
-def segment_questions(interview_log: List[Dict], question_number: int) -> List[Dict]:
+def segment_questions(interview_log: InterviewLog, question_number: int) -> tuple[InterviewLog, InterviewLogToAppend]:
     """
     This number is the number of question that will be asked
     """
@@ -60,8 +70,13 @@ def segment_questions(interview_log: List[Dict], question_number: int) -> List[D
         if interactions["role"] in selection:
             continue
 
-        if interactions["content"] == question_to_cut:
-            return interview_log[:i-2], interview_log[i-2:]
+        
+        if "content" in interactions and interactions["content"] == question_to_cut:
+            break
+    else:
+        return interview_log, None
+
+    return interview_log[:i-2], interview_log[i-2:]
 
 class Interview:
     def __init__(self, OpenAIClient: OpenAI):
@@ -70,23 +85,30 @@ class Interview:
         self.wordcount = 6000 # Default wordcount for the interview
 
         self.interview_persona: Optional[InterviewPersona] = None
-        self.interview_log: List[Dict] = [] # Log of the interview
-        self.interview_log_to_add: Optional[List[Dict]] = None
+        self.interview_log: InterviewLog = []
+        self.interview_log_to_add: InterviewLogToAppend = None
 
-    def with_persona(self, interview_persona: InterviewPersona) -> str:
+    def with_persona(self, interview_persona: InterviewPersona) -> None:
         self.interview_persona = interview_persona
         self.file_name = get_interview_file_name(self.interview_persona.name)
-        self.log("system", f"You are {self.interview_persona.value}, who is being interviewed by a student for their Bachelor Research Project.")
+        self.log_system(f"You are {self.interview_persona.value}, who is being interviewed by a student for their Bachelor Research Project.")
 
-    def log(self, role: str, content: str) -> None:
+    def log_system(self, content: str) -> None:
         self.interview_log.append(
-            {
-                "role": role,
-                "content": content
-            }
+            SystemMessage(content=content, role="system")
         )
 
-    def start(self) -> str:
+    def log_user(self, content: str) -> None:
+        self.interview_log.append(
+            UserMessage(content=content, role="user")
+        )
+
+    def log_assistant(self, content: str) -> None:
+        self.interview_log.append(
+            AssistantMessage(content=content, role="assistant")
+        )
+
+    def start(self) -> None:
         if not self.interview_persona:
             raise Exception("Interview persona is not set, please use the 'with_persona' method to set the persona and try again.")
         
@@ -127,13 +149,16 @@ class Interview:
             return question
 
         # Append the question to the interview log
-        self.log("user", question)
+        self.log_user(question)
 
         return question
 
     def get_answer(self) -> str:
         answer = dialogical_text(self.OpenAIClient, self.interview_log)
-        self.log("assistant", answer)
+        if not answer:
+            raise Exception("No answer returned from the GPT engine")
+        
+        self.log_assistant(answer)
         return answer
 
     def end(self) -> None:
@@ -144,7 +169,7 @@ class Interview:
         print(f"Interview log saved as '{self.file_name}'")
 
     def load_interview(self, interview_file: str) -> None:
-        self.interview_log = pd.read_csv(interview_file).to_dict(orient="records")
+        self.interview_log = extract_log(interview_file)
         self.file_name = interview_file
 
     def continue_interview(self, interview_file: str) -> None:
