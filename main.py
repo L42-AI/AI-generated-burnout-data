@@ -4,6 +4,8 @@ from dotenv import load_dotenv
 from openai import OpenAI
 
 import generate
+from repr import MonologicalData
+from SQL import SQLWorker
 from interview_persona import InterviewPersona
 from monological_prompts import monological_prompts
 
